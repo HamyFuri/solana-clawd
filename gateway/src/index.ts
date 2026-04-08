@@ -191,7 +191,7 @@ bot.command('start', async (msg) => {
     '/alerts on — Enable real-time alerts here',
     '/alerts off — Disable alerts',
     '/watch <mint> — Watch token price',
-    '/whales <min_usd> — Watch large trades',
+    '/whales <minUsd> — Watch large trades',
     '/newpairs — Watch new pair listings',
     '/newlistings — Watch new token listings',
     '',
