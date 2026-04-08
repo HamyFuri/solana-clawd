@@ -17,6 +17,9 @@ const GATEKEEPER_RPC = process.env.GATEKEEPER_RPC_URL ?? '';
 const PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY ?? '';
 const PUBLIC_KEY = process.env.SOLANA_PUBLIC_KEY ?? '';
 
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
 // ---------------------------------------------------------------------------
 // Connection — prefer Gatekeeper (beta), fallback to standard Helius
 // ---------------------------------------------------------------------------
@@ -66,11 +69,15 @@ export async function getTokenAccounts(owner?: string): Promise<Array<{
   const pubkey = owner ? new PublicKey(owner) : getPublicKey();
   if (!pubkey) throw new Error('No wallet address configured');
 
-  const resp = await connection.getParsedTokenAccountsByOwner(pubkey, {
-    programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-  });
+  // Fetch both standard SPL and Token-2022 accounts
+  const [stdResp, t22Resp] = await Promise.all([
+    connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID }),
+    connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_2022_PROGRAM_ID })
+  ]);
 
-  return resp.value
+  const allAccounts = [...stdResp.value, ...t22Resp.value];
+
+  return allAccounts
     .map(({ account }) => {
       const data = account.data as ParsedAccountData;
       const info = data.parsed?.info;

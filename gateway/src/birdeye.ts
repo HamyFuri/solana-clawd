@@ -218,7 +218,10 @@ async function birdeyeGet(path: string): Promise<unknown> {
       'x-chain': 'solana',
     },
   });
-  if (!resp.ok) throw new Error(`Birdeye API ${resp.status}: ${resp.statusText}`);
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Birdeye API ${resp.status}: ${resp.statusText} - ${errText}`);
+  }
   return resp.json();
 }
 

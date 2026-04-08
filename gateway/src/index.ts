@@ -26,11 +26,18 @@ import {
 } from './birdeye.js';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+// Strips dangerous markdown characters from unpredictable blockchain data
+const clean = (str: any) => String(str || '').replace(/[_*`]/g, ' ');
+
+// ---------------------------------------------------------------------------
 // HTTP Gateway (Express)
 // ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json());
-const PORT = parseInt(process.env.GATEWAY_PORT ?? '8080', 10);
+// Fixed to respect Render's native PORT variable first
+const PORT = parseInt(process.env.PORT || process.env.GATEWAY_PORT || '8080', 10);
 
 app.get('/health', (_req, res) => {
   res.json({
@@ -124,34 +131,37 @@ const birdeye = new BirdeyeWS();
 // Alert buffer per chat — latest Birdeye events forwarded to Telegram
 const alertChats = new Set<number>();
 
+// Helper to send alert and auto-unsubscribe if the user blocked the bot
+const broadcastAlert = (text: string) => {
+  for (const chatId of alertChats) {
+    sendMessage(chatId, text).catch((err) => {
+      if (err.message.includes('Forbidden')) alertChats.delete(chatId);
+    });
+  }
+};
+
 birdeye.on('PRICE_DATA', (data: Record<string, unknown>) => {
   const text = `📈 *Price Update*\n` +
-    `Symbol: ${data.symbol}\n` +
+    `Symbol: ${clean(data.symbol)}\n` +
     `O: ${data.o} H: ${data.h} L: ${data.l} C: ${data.c}\n` +
     `Vol: ${data.v}`;
-  for (const chatId of alertChats) {
-    sendMessage(chatId, text).catch(() => {});
-  }
+  broadcastAlert(text);
 });
 
 birdeye.on('TOKEN_NEW_LISTING_DATA', (data: Record<string, unknown>) => {
   const text = `🆕 *New Token Listed*\n` +
-    `Name: ${data.name} (${data.symbol})\n` +
+    `Name: ${clean(data.name)} (${clean(data.symbol)})\n` +
     `Address: \`${data.address}\`\n` +
     `Liquidity: $${data.liquidity}`;
-  for (const chatId of alertChats) {
-    sendMessage(chatId, text).catch(() => {});
-  }
+  broadcastAlert(text);
 });
 
 birdeye.on('NEW_PAIR_DATA', (data: Record<string, unknown>) => {
   const base = data.base as Record<string, unknown> | undefined;
   const text = `🔗 *New Pair*\n` +
-    `${base?.symbol ?? '?'} — Source: ${data.source}\n` +
+    `${clean(base?.symbol ?? '?')} — Source: ${clean(data.source)}\n` +
     `Address: \`${data.address}\``;
-  for (const chatId of alertChats) {
-    sendMessage(chatId, text).catch(() => {});
-  }
+  broadcastAlert(text);
 });
 
 birdeye.on('TXS_LARGE_TRADE_DATA', (data: Record<string, unknown>) => {
@@ -159,11 +169,9 @@ birdeye.on('TXS_LARGE_TRADE_DATA', (data: Record<string, unknown>) => {
   const to = data.to as Record<string, unknown> | undefined;
   const text = `🐋 *Large Trade*\n` +
     `$${Number(data.volumeUSD).toFixed(2)} USD\n` +
-    `${from?.symbol} → ${to?.symbol}\n` +
+    `${clean(from?.symbol)} → ${clean(to?.symbol)}\n` +
     `TX: \`${(data.txHash as string)?.slice(0, 16)}…\``;
-  for (const chatId of alertChats) {
-    sendMessage(chatId, text).catch(() => {});
-  }
+  broadcastAlert(text);
 });
 
 // ---------------------------------------------------------------------------
@@ -275,14 +283,18 @@ bot.command('search', async (msg, args) => {
     return;
   }
   try {
-    const data = (await searchTokens(args)) as { data?: { items?: Array<{ name: string; symbol: string; address: string }> } };
-    const items = data?.data?.items ?? [];
+    const data = (await searchTokens(args)) as any;
+    
+    // Birdeye V3 API groups results by type
+    const tokenGroup = data?.data?.items?.find((i: any) => i.type === 'token');
+    const items = tokenGroup?.result ?? [];
+
     if (items.length === 0) {
       await sendMessage(msg.chat.id, `No results for "${args}".`);
       return;
     }
     const lines = items.slice(0, 10).map(
-      (t) => `• *${t.symbol}* — ${t.name}\n  \`${t.address}\``,
+      (t: any) => `• *${clean(t.symbol || '?')}* — ${clean(t.name || 'Unknown')}\n  \`${t.address}\``,
     );
     await sendMessage(msg.chat.id, `🔍 *Search results for "${args}":*\n\n${lines.join('\n\n')}`);
   } catch (e: unknown) {
@@ -310,7 +322,7 @@ bot.command('assets', async (msg, args) => {
       return;
     }
     const lines = items.slice(0, 15).map(
-      a => `• ${a.content?.metadata?.name ?? 'Unknown'} — \`${a.id?.slice(0, 12)}…\``,
+      a => `• ${clean(a.content?.metadata?.name ?? 'Unknown')} — \`${a.id?.slice(0, 12)}…\``,
     );
     await sendMessage(msg.chat.id, `🗂 *Assets (${items.length}):*\n${lines.join('\n')}`);
   } catch (e: unknown) {

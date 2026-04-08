@@ -26,14 +26,23 @@ export type CommandHandler = (msg: TelegramMessage, args: string) => Promise<voi
 // API helpers
 // ---------------------------------------------------------------------------
 async function tgCall(method: string, body?: Record<string, unknown>): Promise<unknown> {
-  const resp = await fetch(`${API}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const json = (await resp.json()) as { ok: boolean; result?: unknown; description?: string };
-  if (!json.ok) throw new Error(`Telegram API ${method}: ${json.description}`);
-  return json.result;
+  // Prevent infinite hangs on silently dropped connections
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s timeout (Telegram long-poll is 30s)
+
+  try {
+    const resp = await fetch(`${API}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    const json = (await resp.json()) as { ok: boolean; result?: unknown; description?: string };
+    if (!json.ok) throw new Error(`Telegram API ${method}: ${json.description}`);
+    return json.result;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function sendMessage(
@@ -113,7 +122,10 @@ export class TelegramBot {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error('[TelegramBot] Poll error:', msg);
+        // Silently ignore expected network aborts, log real errors
+        if (!msg.includes('aborted')) {
+            console.error('[TelegramBot] Poll error:', msg);
+        }
         await new Promise(r => setTimeout(r, 5000));
       }
     }
